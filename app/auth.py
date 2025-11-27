@@ -19,10 +19,11 @@ try:
 
     # Check if it's a JSON string or a file path
     if service_account_value.strip().startswith("{"):
+        # It looks like JSON content, parse it into a dictionary
         cred_dict = json.loads(service_account_value)
         
-        # FIX: Handle potential escaped newlines in private_key
-        # This fixes issues where \n becomes \\n in some env var systems
+        # --- FIX: Handle escaped newlines in private_key ---
+        # Render/Vercel sometimes escape the \n characters. We fix them here.
         if "private_key" in cred_dict:
             cred_dict["private_key"] = cred_dict["private_key"].replace("\\n", "\n")
             

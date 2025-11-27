@@ -15,35 +15,36 @@ settings = AuthSettings()
 
 # --- Firebase Initialization ---
 try:
-    # Get the value from the environment variable
     service_account_value = settings.FIREBASE_SERVICE_ACCOUNT_JSON
 
-    # LOGIC: Check if it's a JSON string or a file path
+    # Check if it's a JSON string or a file path
     if service_account_value.strip().startswith("{"):
-        # It looks like JSON content, parse it into a dictionary
         cred_dict = json.loads(service_account_value)
+        
+        # FIX: Handle potential escaped newlines in private_key
+        # This fixes issues where \n becomes \\n in some env var systems
+        if "private_key" in cred_dict:
+            cred_dict["private_key"] = cred_dict["private_key"].replace("\\n", "\n")
+            
         cred = credentials.Certificate(cred_dict)
     else:
-        # It doesn't look like JSON, assume it is a file path
         cred = credentials.Certificate(service_account_value)
 
-    firebase_admin.initialize_app(cred)
-    print("Firebase Admin SDK initialized successfully.")
+    # Check if app is already initialized to avoid "App already exists" error during hot-reload
+    if not firebase_admin._apps:
+        firebase_admin.initialize_app(cred)
+        print("Firebase Admin SDK initialized successfully.")
 
 except ValueError as e:
-    print(f"Error initializing Firebase Admin SDK: {e}. Is `FIREBASE_SERVICE_ACCOUNT_JSON` correct?")
+    print(f"CRITICAL ERROR: Invalid JSON in FIREBASE_SERVICE_ACCOUNT_JSON. {e}")
 except Exception as e:
-    print(f"An unexpected error occurred during Firebase init: {e}")
+    print(f"CRITICAL ERROR: Failed to initialize Firebase: {e}")
 
 
 # --- Authentication Dependency ---
 auth_scheme = HTTPBearer()
 
 async def get_current_user(token: HTTPAuthorizationCredentials = Depends(auth_scheme)) -> dict:
-    """
-    A FastAPI dependency that verifies the Firebase ID token in the
-    Authorization header and returns the user's data (including UID).
-    """
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -54,7 +55,6 @@ async def get_current_user(token: HTTPAuthorizationCredentials = Depends(auth_sc
         # Verify the token
         decoded_token = auth.verify_id_token(token.credentials)
         
-        # Return the user's UID and email
         return {
             "uid": decoded_token["uid"],
             "email": decoded_token.get("email", "")
@@ -71,12 +71,11 @@ async def get_current_user(token: HTTPAuthorizationCredentials = Depends(auth_sc
             detail=f"Invalid token: {e}",
         )
     except Exception as e:
+        # This captures the error if Firebase didn't init correctly
+        print(f"Authentication Error: {e}") 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"An error occurred during authentication: {e}",
+            detail="Internal Server Error: Authentication service failed.",
         )
 
-# --- Annotated User Type ---
-# This is a shorthand you can use in your endpoint functions
-# e.g., async def my_endpoint(user: AuthUser):
 AuthUser = Annotated[dict, Depends(get_current_user)]

@@ -21,8 +21,6 @@ app = FastAPI(
 )
 
 # --- CORS Middleware ---
-# This allows your Next.js frontend (running on localhost:3000)
-# to communicate with this backend (running on localhost:8000)
 origins = [
     "http://localhost:3000",        
     "https://grm.drvyn.in",           

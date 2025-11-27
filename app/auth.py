@@ -15,23 +15,26 @@ settings = AuthSettings()
 
 # --- Firebase Initialization ---
 try:
+    # Get the value from the environment variable
     service_account_value = settings.FIREBASE_SERVICE_ACCOUNT_JSON
 
-    # Check if it's a JSON string or a file path
+    # LOGIC: Check if it's a JSON string (for Render/Vercel) or a file path (local)
     if service_account_value.strip().startswith("{"):
-        # It looks like JSON content, parse it into a dictionary
+        # It is a JSON string. Parse it.
         cred_dict = json.loads(service_account_value)
         
-        # --- FIX: Handle escaped newlines in private_key ---
-        # Render/Vercel sometimes escape the \n characters. We fix them here.
+        # --- CRITICAL FIX FOR RENDER/VERCEL ---
+        # The private_key often has escaped newlines (\\n) instead of real newlines (\n).
+        # We must replace them for the Firebase SDK to accept the key.
         if "private_key" in cred_dict:
             cred_dict["private_key"] = cred_dict["private_key"].replace("\\n", "\n")
             
         cred = credentials.Certificate(cred_dict)
     else:
+        # It is a file path (e.g., "serviceAccountKey.json" for local dev)
         cred = credentials.Certificate(service_account_value)
 
-    # Check if app is already initialized to avoid "App already exists" error during hot-reload
+    # Initialize Firebase if it hasn't been initialized yet
     if not firebase_admin._apps:
         firebase_admin.initialize_app(cred)
         print("Firebase Admin SDK initialized successfully.")
@@ -39,6 +42,7 @@ try:
 except ValueError as e:
     print(f"CRITICAL ERROR: Invalid JSON in FIREBASE_SERVICE_ACCOUNT_JSON. {e}")
 except Exception as e:
+    # This catches other init errors preventing the 500 crash loop
     print(f"CRITICAL ERROR: Failed to initialize Firebase: {e}")
 
 
@@ -46,6 +50,9 @@ except Exception as e:
 auth_scheme = HTTPBearer()
 
 async def get_current_user(token: HTTPAuthorizationCredentials = Depends(auth_scheme)) -> dict:
+    """
+    Verifies the Firebase ID token and returns the user's UID and email.
+    """
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -72,8 +79,8 @@ async def get_current_user(token: HTTPAuthorizationCredentials = Depends(auth_sc
             detail=f"Invalid token: {e}",
         )
     except Exception as e:
-        # This captures the error if Firebase didn't init correctly
-        print(f"Authentication Error: {e}") 
+        # This catches errors if Firebase wasn't initialized
+        print(f"Authentication Error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal Server Error: Authentication service failed.",

@@ -235,6 +235,7 @@ class JobCardIn(BaseModel):
     photos: List[str] = []
     signature: Optional[str] = None
     notes: Optional[str] = None
+    assignedMechanic: Optional[str] = None
 
 class InvoiceIn(BaseModel):
     jobCardId: str

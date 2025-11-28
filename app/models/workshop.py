@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime
 
-# --- Sub-models (used inside other models) ---
+# --- Sub-models ---
 
 class InvoiceItem(BaseModel):
     description: str
@@ -23,8 +23,7 @@ class ServiceItem(BaseModel):
     cost: float
     taxPercent: float
 
-# --- Main Document Models (these are MongoDB collections) ---
-# All models include 'workshop_id' to keep data separate for each user.
+# --- Main Document Models ---
 
 class Employee(Document):
     id: PydanticObjectId = Field(default_factory=PydanticObjectId, alias="_id")
@@ -81,7 +80,7 @@ class Booking(Document):
     customerRemark: Optional[str] = None
     odometer: str
     fuelIndicator: int
-    status: str  # "pending", "confirmed", "in-progress", "completed", "cancelled"
+    status: str
     date: Optional[str] = None
     time: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -100,9 +99,6 @@ class Customer(Document):
     city: Optional[str] = None
     state: Optional[str] = None
     zipCode: Optional[str] = None
-    # These fields will be calculated, not stored directly
-    # bookings: int = 0
-    # totalSpent: float = 0
     notes: Optional[str] = None
     
     class Settings:
@@ -111,7 +107,7 @@ class Customer(Document):
 class JobCard(Document):
     id: PydanticObjectId = Field(default_factory=PydanticObjectId, alias="_id")
     workshop_id: Indexed(str)
-    booking_id: Indexed(str) # Links to the Booking.id
+    booking_id: Indexed(str)
     customer: str
     phone: Optional[str] = None
     email: Optional[str] = None
@@ -119,9 +115,13 @@ class JobCard(Document):
     service: str
     date: str
     time: str
-    assignedMechanic: str
+    # Updated Fields
+    workers: List[str] = []
     spareParts: List[SparePartItem] = []
     services: List[ServiceItem] = []
+    issues: List[str] = []
+    photos: List[str] = []
+    signature: Optional[str] = None
     notes: Optional[str] = None
     
     class Settings:
@@ -136,7 +136,7 @@ class Invoice(Document):
     items: List[InvoiceItem] = []
     date: str
     dueDate: str
-    status: str  # "draft", "sent", "paid", "overdue"
+    status: str
     notes: Optional[str] = None
     
     class Settings:
@@ -157,8 +157,7 @@ class Part(Document):
     class Settings:
         name = "parts"
 
-# --- Input Models (for receiving data from frontend) ---
-# These match the '...In' types from useApi.ts
+# --- Input Models ---
 
 class EmployeeIn(BaseModel):
     designation: str
@@ -229,9 +228,12 @@ class JobCardIn(BaseModel):
     service: str
     date: str
     time: str
-    assignedMechanic: str
+    workers: List[str] = []
     spareParts: List[SparePartItem] = []
     services: List[ServiceItem] = []
+    issues: List[str] = []
+    photos: List[str] = []
+    signature: Optional[str] = None
     notes: Optional[str] = None
 
 class InvoiceIn(BaseModel):

@@ -15,6 +15,7 @@ from app.models.workshop import (
 from app.services.activity_service import log_activity
 from beanie import PydanticObjectId
 
+# --- This is the missing line causing the AttributeError ---
 router = APIRouter(
     prefix="/workshop",
     tags=["Workshop Data"]
@@ -124,7 +125,7 @@ async def update_booking_status(booking_id: str, data: BookingStatusUpdate, user
     await log_activity(user["uid"], f"Booking for {booking.customerName} set to {data.status}", "Wrench")
     return updated_booking
 
-# --- Customers (Example from your 'customers/page.tsx') ---
+# --- Customers ---
 @router.post("/customers", response_model=Customer, status_code=status.HTTP_201_CREATED)
 async def create_customer(data: CustomerIn, user: AuthUser):
     workshop_id = user["uid"]
@@ -137,9 +138,21 @@ async def create_customer(data: CustomerIn, user: AuthUser):
 async def get_customers(user: AuthUser):
     return await Customer.find(Customer.workshop_id == user["uid"]).to_list()
 
-# ... (Add PUT and DELETE for Customers as needed, following the pattern) ...
+@router.put("/customers/{customer_id}", response_model=Customer)
+async def update_customer(customer_id: str, data: CustomerIn, user: AuthUser):
+    customer = await find_document(Customer, customer_id, user["uid"], "Customer not found")
+    update_data = data.model_dump(exclude_unset=True)
+    await customer.update({"$set": update_data})
+    return await Customer.get(customer.id)
 
-# --- Job Cards (Example from your 'bookings/[id]/page.tsx') ---
+@router.delete("/customers/{customer_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_customer(customer_id: str, user: AuthUser):
+    customer = await find_document(Customer, customer_id, user["uid"], "Customer not found")
+    await customer.delete()
+    await log_activity(user["uid"], f"Deleted customer: {customer.name}", "Trash2")
+    return None
+
+# --- Job Cards ---
 @router.post("/jobcards", response_model=JobCard, status_code=status.HTTP_201_CREATED)
 async def create_job_card(data: JobCardIn, user: AuthUser):
     workshop_id = user["uid"]
@@ -152,9 +165,14 @@ async def create_job_card(data: JobCardIn, user: AuthUser):
 async def get_job_cards(user: AuthUser):
     return await JobCard.find(JobCard.workshop_id == user["uid"]).to_list()
 
-# ... (Add PUT, DELETE, and GET by booking_id for JobCards as needed) ...
+@router.put("/jobcards/{jobcard_id}", response_model=JobCard)
+async def update_job_card(jobcard_id: str, data: JobCardIn, user: AuthUser):
+    job_card = await find_document(JobCard, jobcard_id, user["uid"], "Job Card not found")
+    update_data = data.model_dump(exclude_unset=True)
+    await job_card.update({"$set": update_data})
+    return await JobCard.get(job_card.id)
 
-# --- Invoices (Example from your 'invoices/page.tsx') ---
+# --- Invoices ---
 @router.post("/invoices", response_model=Invoice, status_code=status.HTTP_201_CREATED)
 async def create_invoice(data: InvoiceIn, user: AuthUser):
     workshop_id = user["uid"]
@@ -167,9 +185,21 @@ async def create_invoice(data: InvoiceIn, user: AuthUser):
 async def get_invoices(user: AuthUser):
     return await Invoice.find(Invoice.workshop_id == user["uid"]).to_list()
 
-# ... (Add PUT and DELETE for Invoices as needed) ...
+@router.put("/invoices/{invoice_id}", response_model=Invoice)
+async def update_invoice(invoice_id: str, data: InvoiceIn, user: AuthUser):
+    invoice = await find_document(Invoice, invoice_id, user["uid"], "Invoice not found")
+    update_data = data.model_dump(exclude_unset=True)
+    await invoice.update({"$set": update_data})
+    return await Invoice.get(invoice.id)
 
-# --- Parts (Example from your 'parts/page.tsx') ---
+@router.delete("/invoices/{invoice_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_invoice(invoice_id: str, user: AuthUser):
+    invoice = await find_document(Invoice, invoice_id, user["uid"], "Invoice not found")
+    await invoice.delete()
+    await log_activity(user["uid"], f"Deleted invoice for {invoice.customer}", "Trash2")
+    return None
+
+# --- Parts ---
 @router.post("/parts", response_model=Part, status_code=status.HTTP_201_CREATED)
 async def create_part(data: PartIn, user: AuthUser):
     workshop_id = user["uid"]
@@ -182,4 +212,15 @@ async def create_part(data: PartIn, user: AuthUser):
 async def get_parts(user: AuthUser):
     return await Part.find(Part.workshop_id == user["uid"]).to_list()
 
-# ... (Add PUT and DELETE for Parts as needed) ...
+@router.put("/parts/{part_id}", response_model=Part)
+async def update_part(part_id: str, data: PartIn, user: AuthUser):
+    part = await find_document(Part, part_id, user["uid"], "Part not found")
+    update_data = data.model_dump(exclude_unset=True)
+    await part.update({"$set": update_data})
+    return await Part.get(part.id)
+
+@router.delete("/parts/{part_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_part(part_id: str, user: AuthUser):
+    part = await find_document(Part, part_id, user["uid"], "Part not found")
+    await part.delete()
+    return None

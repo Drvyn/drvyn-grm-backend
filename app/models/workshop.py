@@ -123,6 +123,7 @@ class JobCard(Document):
     photos: List[str] = []
     signature: Optional[str] = None
     notes: Optional[str] = None
+    assignedMechanic: Optional[str] = None
     
     class Settings:
         name = "job_cards"

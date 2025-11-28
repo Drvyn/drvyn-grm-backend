@@ -81,8 +81,8 @@ async def get_dashboard_stats(
             }
         ]
         
-        # FIX: Use get_motor_collection() to bypass Beanie await error
-        revenue_result = await Invoice.get_motor_collection().aggregate(revenue_pipeline).to_list(1)
+        # FIX: Use get_pymongo_collection() to access Motor directly
+        revenue_result = await Invoice.get_pymongo_collection().aggregate(revenue_pipeline).to_list(length=1)
         total_revenue = revenue_result[0]["totalRevenue"] if revenue_result else 0.0
 
         return DashboardStats(
@@ -93,7 +93,7 @@ async def get_dashboard_stats(
         )
 
     except Exception as e:
-        print(f"Dashboard Stats Error: {e}") # Add logging
+        print(f"Dashboard Stats Error: {e}") 
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -136,17 +136,14 @@ async def get_dashboard_chart_data(
         }
     ]
     
-    # FIX: Use get_motor_collection() to bypass Beanie await error
-    booking_results = await Booking.get_motor_collection().aggregate(booking_pipeline).to_list(None)
+    # FIX: Use get_pymongo_collection() to access Motor directly
+    booking_results = await Booking.get_pymongo_collection().aggregate(booking_pipeline).to_list(length=None)
     
     for res in booking_results:
         date_key = res["_id"]
-        # Handle if date format in DB matches YYYY-MM-DD
         if date_key in data_map:
-            # We need to find the correct ChartDataPoint by mapping the date string back
             try:
                 target_date = datetime.strptime(date_key, "%Y-%m-%d").strftime("%m/%d")
-                # Find the item in our map values
                 for item in data_map.values():
                     if item.date == target_date:
                         item.bookings = res["count"]
@@ -172,8 +169,8 @@ async def get_dashboard_chart_data(
         }
     ]
 
-    # FIX: Use get_motor_collection() to bypass Beanie await error
-    revenue_results = await Invoice.get_motor_collection().aggregate(revenue_pipeline).to_list(None)
+    # FIX: Use get_pymongo_collection() to access Motor directly
+    revenue_results = await Invoice.get_pymongo_collection().aggregate(revenue_pipeline).to_list(length=None)
     
     for res in revenue_results:
         date_key = res["_id"]

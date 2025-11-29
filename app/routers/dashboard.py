@@ -43,11 +43,13 @@ async def get_dashboard_stats(
 ):
     """
     Calculates and returns key stats for the dashboard within a date range.
+    Uses direct DB driver to ensure compatibility and accuracy.
     """
     workshop_id = user["uid"]
     
-    # Create date filter for string-based dates (YYYY-MM-DD)
-    date_filter = {
+    # Base query for the date range and workshop
+    base_query = {
+        "workshop_id": workshop_id,
         "date": {
             "$gte": from_date.isoformat(),
             "$lte": to_date.isoformat()
@@ -55,25 +57,23 @@ async def get_dashboard_stats(
     }
 
     try:
-        # Get booking counts
-        bookings_count = await Booking.find(
-            Booking.workshop_id == workshop_id,
-            date_filter
-        ).count()
-        
-        completed_count = await Booking.find(
-            Booking.workshop_id == workshop_id,
-            Booking.status == "completed",
-            date_filter
-        ).count()
-        
-        pending_count = await Booking.find(
-            Booking.workshop_id == workshop_id,
-            Booking.status == "pending",
-            date_filter
-        ).count()
+        booking_collection = get_db_collection(Booking)
+        invoice_collection = get_db_collection(Invoice)
 
-        # Calculate revenue from *paid* invoices in the date range
+        # 1. Total Bookings
+        bookings_count = await booking_collection.count_documents(base_query)
+        
+        # 2. Completed Jobs
+        completed_query = base_query.copy()
+        completed_query["status"] = "completed"
+        completed_count = await booking_collection.count_documents(completed_query)
+        
+        # 3. Pending Tasks
+        pending_query = base_query.copy()
+        pending_query["status"] = "pending"
+        pending_count = await booking_collection.count_documents(pending_query)
+
+        # 4. Revenue (from paid invoices)
         revenue_pipeline = [
             {
                 "$match": {
@@ -93,9 +93,7 @@ async def get_dashboard_stats(
             }
         ]
         
-        # Use helper to support both local and render environments
-        collection = get_db_collection(Invoice)
-        revenue_result = await collection.aggregate(revenue_pipeline).to_list(length=1)
+        revenue_result = await invoice_collection.aggregate(revenue_pipeline).to_list(length=1)
         total_revenue = revenue_result[0]["totalRevenue"] if revenue_result else 0.0
 
         return DashboardStats(
@@ -106,7 +104,7 @@ async def get_dashboard_stats(
         )
 
     except Exception as e:
-        print(f"Dashboard Stats Error: {e}")
+        print(f"Dashboard Stats Error: {e}") 
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -127,9 +125,12 @@ async def get_dashboard_chart_data(
     current = start_date
     while current <= end_date:
         d_str = current.isoformat()
-        data_map[d_str] = ChartDataPoint(date=current.strftime("%m/%d")) # Format MM/DD for chart
+        data_map[d_str] = ChartDataPoint(date=current.strftime("%m/%d")) 
         current += timedelta(days=1)
 
+    # Use helper to support both local and render environments
+    booking_collection = get_db_collection(Booking)
+    
     # Aggregate Bookings per day
     booking_pipeline = [
         {
@@ -149,8 +150,6 @@ async def get_dashboard_chart_data(
         }
     ]
     
-    # Use helper to support both local and render environments
-    booking_collection = get_db_collection(Booking)
     booking_results = await booking_collection.aggregate(booking_pipeline).to_list(length=None)
     
     for res in booking_results:
@@ -166,6 +165,9 @@ async def get_dashboard_chart_data(
                         break
             except ValueError:
                 pass
+
+    # Use helper for invoices
+    invoice_collection = get_db_collection(Invoice)
 
     # Aggregate Revenue per day (Invoices)
     revenue_pipeline = [
@@ -184,8 +186,6 @@ async def get_dashboard_chart_data(
         }
     ]
 
-    # Use helper to support both local and render environments
-    invoice_collection = get_db_collection(Invoice)
     revenue_results = await invoice_collection.aggregate(revenue_pipeline).to_list(length=None)
     
     for res in revenue_results:
@@ -210,6 +210,8 @@ async def get_recent_activity(user: AuthUser):
     """
     workshop_id = user["uid"]
     
+    # Simple queries usually work fine with Beanie's find(), but we can leave this as is
+    # unless it also proves problematic. It uses simple boolean logic so usually safe.
     activities = await ActivityLog.find(
         ActivityLog.workshop_id == workshop_id
     ).sort(-ActivityLog.created_at).limit(5).to_list()

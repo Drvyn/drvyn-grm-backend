@@ -23,6 +23,18 @@ class ChartDataPoint(BaseModel):
     completed: int = 0
     revenue: float = 0.0
 
+# --- Helper to handle version differences between Local and Render ---
+def get_db_collection(model_class):
+    """
+    Returns the underlying Motor collection, handling differences between 
+    Beanie versions (get_motor_collection vs get_pymongo_collection).
+    """
+    if hasattr(model_class, "get_pymongo_collection"):
+        return model_class.get_pymongo_collection()
+    if hasattr(model_class, "get_motor_collection"):
+        return model_class.get_motor_collection()
+    raise AttributeError(f"Model {model_class} does not have a collection accessor method.")
+
 @router.get("/dashboard-stats", response_model=DashboardStats)
 async def get_dashboard_stats(
     user: AuthUser,
@@ -81,8 +93,9 @@ async def get_dashboard_stats(
             }
         ]
         
-        # FIX: Use get_pymongo_collection() to access Motor directly
-        revenue_result = await Invoice.get_pymongo_collection().aggregate(revenue_pipeline).to_list(length=1)
+        # Use helper to support both local and render environments
+        collection = get_db_collection(Invoice)
+        revenue_result = await collection.aggregate(revenue_pipeline).to_list(length=1)
         total_revenue = revenue_result[0]["totalRevenue"] if revenue_result else 0.0
 
         return DashboardStats(
@@ -93,7 +106,7 @@ async def get_dashboard_stats(
         )
 
     except Exception as e:
-        print(f"Dashboard Stats Error: {e}") 
+        print(f"Dashboard Stats Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -136,11 +149,13 @@ async def get_dashboard_chart_data(
         }
     ]
     
-    # FIX: Use get_pymongo_collection() to access Motor directly
-    booking_results = await Booking.get_pymongo_collection().aggregate(booking_pipeline).to_list(length=None)
+    # Use helper to support both local and render environments
+    booking_collection = get_db_collection(Booking)
+    booking_results = await booking_collection.aggregate(booking_pipeline).to_list(length=None)
     
     for res in booking_results:
         date_key = res["_id"]
+        # Handle if date format in DB matches YYYY-MM-DD
         if date_key in data_map:
             try:
                 target_date = datetime.strptime(date_key, "%Y-%m-%d").strftime("%m/%d")
@@ -169,8 +184,9 @@ async def get_dashboard_chart_data(
         }
     ]
 
-    # FIX: Use get_pymongo_collection() to access Motor directly
-    revenue_results = await Invoice.get_pymongo_collection().aggregate(revenue_pipeline).to_list(length=None)
+    # Use helper to support both local and render environments
+    invoice_collection = get_db_collection(Invoice)
+    revenue_results = await invoice_collection.aggregate(revenue_pipeline).to_list(length=None)
     
     for res in revenue_results:
         date_key = res["_id"]

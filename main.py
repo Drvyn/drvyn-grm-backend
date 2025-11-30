@@ -1,4 +1,7 @@
 import uvicorn
+import asyncio
+import logging
+import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -6,13 +9,44 @@ from contextlib import asynccontextmanager
 from app.db import init_db
 from app.routers import workshop, dashboard
 
+# --- Setup Logging ---
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# --- Keep Alive Function ---
+async def keep_alive():
+    url = "https://drvyn-grm-backend.onrender.com/" 
+    while True:
+        try:
+            async with httpx.AsyncClient() as client:
+                await client.get(url)
+            logger.info("Keep-alive ping successful")
+        except Exception as e:
+            logger.error(f"Keep-alive ping failed: {e}")
+        
+        # Ping every 10 minutes (600 seconds)
+        await asyncio.sleep(600) 
+
+# --- Lifespan (Startup & Shutdown) ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # On startup: Initialize the database connection and Beanie models
+    # 1. Startup: Initialize Database
     await init_db()
-    yield
-    # On shutdown: (add cleanup code here if needed)
+    
+    # 2. Startup: Start Background Task
+    # We store the task in a variable so we can cancel it later
+    task = asyncio.create_task(keep_alive())
+    
+    yield # App runs here
+    
+    # 3. Shutdown: Clean up task
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        logger.info("Keep-alive task stopped")
 
+# --- App Definition ---
 app = FastAPI(
     title="DrvynGRM API",
     description="Backend API for the Drvyn Garage Management System",
@@ -35,8 +69,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- API Routers ---
-# Include all the different parts of your API
+# --- Include Routers ---
 app.include_router(workshop.router)
 app.include_router(dashboard.router)
 
@@ -46,4 +79,4 @@ def read_root():
     return {"message": "Welcome to the DrvynGRM API"}
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True) 

@@ -1,8 +1,9 @@
-from fastapi import APIRouter, HTTPException, status
-from typing import List
+from fastapi import APIRouter, HTTPException, status, Depends
+from typing import List, Dict, Any
 from datetime import datetime
+from firebase_admin import auth
 
-from app.auth import AuthUser
+from app.auth import AuthUser, AdminUser, verify_admin
 from app.models.workshop import (
     Employee, EmployeeIn,
     Department, DepartmentIn,
@@ -14,24 +15,97 @@ from app.models.workshop import (
 )
 from app.services.activity_service import log_activity
 from beanie import PydanticObjectId
+from pydantic import BaseModel
 
-# --- This is the missing line causing the AttributeError ---
 router = APIRouter(
     prefix="/workshop",
     tags=["Workshop Data"]
 )
 
+# --- Admin Models ---
+class WorkshopStats(BaseModel):
+    workshop_id: str
+    name: str
+    email: str
+    total_bookings: int
+    revenue: float
+    pending_tasks: int
+
 # --- Helper Function ---
 async def find_document(model, doc_id, workshop_id, not_found_msg="Item not found"):
-    """Fetches a document by its ID and workshop_id."""
     try:
         doc = await model.get(PydanticObjectId(doc_id))
     except Exception:
         doc = None
-        
     if not doc or doc.workshop_id != workshop_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=not_found_msg)
     return doc
+
+# --- ADMIN ENDPOINTS ---
+@router.get("/admin/workshops", response_model=List[WorkshopStats], tags=["Admin"])
+async def get_all_workshops_stats(is_admin: bool = Depends(verify_admin)):
+    """
+    Admin: Fetches statistics for all workshops.
+    """
+    # 1. Aggregate Bookings (Total & Pending)
+    booking_pipeline = [
+        {
+            "$group": {
+                "_id": "$workshop_id",
+                "total": {"$sum": 1},
+                "pending": {
+                    "$sum": {"$cond": [{"$eq": ["$status", "pending"]}, 1, 0]}
+                }
+            }
+        }
+    ]
+    booking_stats = await Booking.get_motor_collection().aggregate(booking_pipeline).to_list(None)
+    booking_map = {item["_id"]: item for item in booking_stats}
+
+    # 2. Aggregate Revenue (Paid Invoices)
+    revenue_pipeline = [
+        {"$match": {"status": "paid"}},
+        {
+            "$group": {
+                "_id": "$workshop_id",
+                "totalRevenue": {"$sum": "$amount"}
+            }
+        }
+    ]
+    revenue_stats = await Invoice.get_motor_collection().aggregate(revenue_pipeline).to_list(None)
+    revenue_map = {item["_id"]: item["totalRevenue"] for item in revenue_stats}
+
+    # 3. Get all unique workshop IDs from both sources
+    all_workshop_ids = set(booking_map.keys()) | set(revenue_map.keys())
+
+    results = []
+    for wid in all_workshop_ids:
+        if not wid: continue
+        
+        # Fetch user details from Firebase
+        try:
+            user_record = auth.get_user(wid)
+            name = user_record.display_name or "Unknown Workshop"
+            email = user_record.email or "No Email"
+        except Exception:
+            name = "Unknown ID"
+            email = wid
+
+        b_data = booking_map.get(wid, {"total": 0, "pending": 0})
+        rev = revenue_map.get(wid, 0.0)
+
+        results.append(WorkshopStats(
+            workshop_id=wid,
+            name=name,
+            email=email,
+            total_bookings=b_data["total"],
+            revenue=rev,
+            pending_tasks=b_data["pending"]
+        ))
+
+    return results
+
+# --- Workshop Endpoints (Existing) ---
 
 # --- Employees ---
 @router.post("/employees", response_model=Employee, status_code=status.HTTP_201_CREATED)
@@ -49,13 +123,9 @@ async def get_employees(user: AuthUser):
 @router.put("/employees/{employee_id}", response_model=Employee)
 async def update_employee(employee_id: str, data: EmployeeIn, user: AuthUser):
     employee = await find_document(Employee, employee_id, user["uid"], "Employee not found")
-    
     update_data = data.model_dump(exclude_unset=True)
     await employee.update({"$set": update_data})
-    
-    # Re-fetch to get updated data
-    updated_employee = await Employee.get(employee.id)
-    return updated_employee
+    return await Employee.get(employee.id)
 
 @router.delete("/employees/{employee_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_employee(employee_id: str, user: AuthUser):
@@ -81,12 +151,7 @@ async def get_departments(user: AuthUser):
 @router.post("/bookings", response_model=Booking, status_code=status.HTTP_201_CREATED)
 async def create_booking(data: BookingIn, user: AuthUser):
     workshop_id = user["uid"]
-    booking = Booking(
-        **data.model_dump(), 
-        workshop_id=workshop_id,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow()
-    )
+    booking = Booking(**data.model_dump(), workshop_id=workshop_id)
     await booking.insert()
     await log_activity(workshop_id, f"New booking for {booking.customerName}", "Clock")
     return booking
@@ -98,15 +163,12 @@ async def get_bookings(user: AuthUser):
 @router.put("/bookings/{booking_id}", response_model=Booking)
 async def update_booking(booking_id: str, data: BookingIn, user: AuthUser):
     booking = await find_document(Booking, booking_id, user["uid"], "Booking not found")
-    
     update_data = data.model_dump(exclude_unset=True)
     update_data["updated_at"] = datetime.utcnow()
-    
     await booking.update({"$set": update_data})
-    
-    updated_booking = await Booking.get(booking.id)
-    await log_activity(user["uid"], f"Updated booking for {updated_booking.customerName}", "Edit2")
-    return updated_booking
+    updated = await Booking.get(booking.id)
+    await log_activity(user["uid"], f"Updated booking for {updated.customerName}", "Edit2")
+    return updated
 
 @router.delete("/bookings/{booking_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_booking(booking_id: str, user: AuthUser):
@@ -118,12 +180,10 @@ async def delete_booking(booking_id: str, user: AuthUser):
 @router.put("/bookings/{booking_id}/status", response_model=Booking)
 async def update_booking_status(booking_id: str, data: BookingStatusUpdate, user: AuthUser):
     booking = await find_document(Booking, booking_id, user["uid"], "Booking not found")
-    
     await booking.update({"$set": {"status": data.status, "updated_at": datetime.utcnow()}})
-    
-    updated_booking = await Booking.get(booking.id)
+    updated = await Booking.get(booking.id)
     await log_activity(user["uid"], f"Booking for {booking.customerName} set to {data.status}", "Wrench")
-    return updated_booking
+    return updated
 
 # --- Customers ---
 @router.post("/customers", response_model=Customer, status_code=status.HTTP_201_CREATED)
@@ -141,8 +201,7 @@ async def get_customers(user: AuthUser):
 @router.put("/customers/{customer_id}", response_model=Customer)
 async def update_customer(customer_id: str, data: CustomerIn, user: AuthUser):
     customer = await find_document(Customer, customer_id, user["uid"], "Customer not found")
-    update_data = data.model_dump(exclude_unset=True)
-    await customer.update({"$set": update_data})
+    await customer.update({"$set": data.model_dump(exclude_unset=True)})
     return await Customer.get(customer.id)
 
 @router.delete("/customers/{customer_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -168,8 +227,7 @@ async def get_job_cards(user: AuthUser):
 @router.put("/jobcards/{jobcard_id}", response_model=JobCard)
 async def update_job_card(jobcard_id: str, data: JobCardIn, user: AuthUser):
     job_card = await find_document(JobCard, jobcard_id, user["uid"], "Job Card not found")
-    update_data = data.model_dump(exclude_unset=True)
-    await job_card.update({"$set": update_data})
+    await job_card.update({"$set": data.model_dump(exclude_unset=True)})
     return await JobCard.get(job_card.id)
 
 # --- Invoices ---
@@ -188,8 +246,7 @@ async def get_invoices(user: AuthUser):
 @router.put("/invoices/{invoice_id}", response_model=Invoice)
 async def update_invoice(invoice_id: str, data: InvoiceIn, user: AuthUser):
     invoice = await find_document(Invoice, invoice_id, user["uid"], "Invoice not found")
-    update_data = data.model_dump(exclude_unset=True)
-    await invoice.update({"$set": update_data})
+    await invoice.update({"$set": data.model_dump(exclude_unset=True)})
     return await Invoice.get(invoice.id)
 
 @router.delete("/invoices/{invoice_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -215,8 +272,7 @@ async def get_parts(user: AuthUser):
 @router.put("/parts/{part_id}", response_model=Part)
 async def update_part(part_id: str, data: PartIn, user: AuthUser):
     part = await find_document(Part, part_id, user["uid"], "Part not found")
-    update_data = data.model_dump(exclude_unset=True)
-    await part.update({"$set": update_data})
+    await part.update({"$set": data.model_dump(exclude_unset=True)})
     return await Part.get(part.id)
 
 @router.delete("/parts/{part_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -224,3 +280,10 @@ async def delete_part(part_id: str, user: AuthUser):
     part = await find_document(Part, part_id, user["uid"], "Part not found")
     await part.delete()
     return None
+
+@router.get("/admin/workshops/{workshop_id}/jobcards", response_model=List[JobCard], tags=["Admin"])
+async def get_admin_workshop_job_cards(workshop_id: str, is_admin: bool = Depends(verify_admin)):
+    """
+    Admin: Get all job cards for a specific workshop.
+    """
+    return await JobCard.find(JobCard.workshop_id == workshop_id).sort(-JobCard.id).to_list()

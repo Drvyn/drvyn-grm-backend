@@ -41,71 +41,98 @@ async def find_document(model, doc_id, workshop_id, not_found_msg="Item not foun
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=not_found_msg)
     return doc
 
+# Helper to handle Beanie/Motor collection access differences
+def get_db_collection(model_class):
+    if hasattr(model_class, "get_pymongo_collection"):
+        return model_class.get_pymongo_collection()
+    if hasattr(model_class, "get_motor_collection"):
+        return model_class.get_motor_collection()
+    # Fallback/Default for older versions
+    return model_class.get_motor_collection()
+
 # --- ADMIN ENDPOINTS ---
+
 @router.get("/admin/workshops", response_model=List[WorkshopStats], tags=["Admin"])
 async def get_all_workshops_stats(is_admin: bool = Depends(verify_admin)):
     """
     Admin: Fetches statistics for all workshops.
     """
-    # 1. Aggregate Bookings (Total & Pending)
-    booking_pipeline = [
-        {
-            "$group": {
-                "_id": "$workshop_id",
-                "total": {"$sum": 1},
-                "pending": {
-                    "$sum": {"$cond": [{"$eq": ["$status", "pending"]}, 1, 0]}
+    try:
+        booking_collection = get_db_collection(Booking)
+        invoice_collection = get_db_collection(Invoice)
+
+        # 1. Aggregate Bookings (Total & Pending)
+        booking_pipeline = [
+            {
+                "$group": {
+                    "_id": "$workshop_id",
+                    "total": {"$sum": 1},
+                    "pending": {
+                        "$sum": {"$cond": [{"$eq": ["$status", "pending"]}, 1, 0]}
+                    }
                 }
             }
-        }
-    ]
-    booking_stats = await Booking.get_motor_collection().aggregate(booking_pipeline).to_list(None)
-    booking_map = {item["_id"]: item for item in booking_stats}
+        ]
+        booking_stats = await booking_collection.aggregate(booking_pipeline).to_list(None)
+        booking_map = {item["_id"]: item for item in booking_stats if item["_id"]}
 
-    # 2. Aggregate Revenue (Paid Invoices)
-    revenue_pipeline = [
-        {"$match": {"status": "paid"}},
-        {
-            "$group": {
-                "_id": "$workshop_id",
-                "totalRevenue": {"$sum": "$amount"}
+        # 2. Aggregate Revenue (Paid Invoices)
+        revenue_pipeline = [
+            {"$match": {"status": "paid"}},
+            {
+                "$group": {
+                    "_id": "$workshop_id",
+                    "totalRevenue": {"$sum": "$amount"}
+                }
             }
-        }
-    ]
-    revenue_stats = await Invoice.get_motor_collection().aggregate(revenue_pipeline).to_list(None)
-    revenue_map = {item["_id"]: item["totalRevenue"] for item in revenue_stats}
+        ]
+        revenue_stats = await invoice_collection.aggregate(revenue_pipeline).to_list(None)
+        revenue_map = {item["_id"]: item["totalRevenue"] for item in revenue_stats if item["_id"]}
 
-    # 3. Get all unique workshop IDs from both sources
-    all_workshop_ids = set(booking_map.keys()) | set(revenue_map.keys())
+        # 3. Get all unique workshop IDs from both sources
+        all_workshop_ids = set(booking_map.keys()) | set(revenue_map.keys())
 
-    results = []
-    for wid in all_workshop_ids:
-        if not wid: continue
-        
-        # Fetch user details from Firebase
-        try:
-            user_record = auth.get_user(wid)
-            name = user_record.display_name or "Unknown Workshop"
-            email = user_record.email or "No Email"
-        except Exception:
-            name = "Unknown ID"
-            email = wid
+        results = []
+        for wid in all_workshop_ids:
+            if not wid: continue
+            
+            # Fetch user details from Firebase safely
+            name = "Unknown Workshop"
+            email = str(wid)
+            try:
+                user_record = auth.get_user(wid)
+                name = user_record.display_name or "Unknown Workshop"
+                email = user_record.email or str(wid)
+            except Exception as e:
+                # Log error if needed, but continue execution
+                print(f"Error fetching user {wid}: {e}")
+                pass
 
-        b_data = booking_map.get(wid, {"total": 0, "pending": 0})
-        rev = revenue_map.get(wid, 0.0)
+            b_data = booking_map.get(wid, {"total": 0, "pending": 0})
+            rev = revenue_map.get(wid, 0.0)
 
-        results.append(WorkshopStats(
-            workshop_id=wid,
-            name=name,
-            email=email,
-            total_bookings=b_data["total"],
-            revenue=rev,
-            pending_tasks=b_data["pending"]
-        ))
+            results.append(WorkshopStats(
+                workshop_id=str(wid),
+                name=name,
+                email=email,
+                total_bookings=b_data.get("total", 0),
+                revenue=rev,
+                pending_tasks=b_data.get("pending", 0)
+            ))
 
-    return results
+        return results
+    except Exception as e:
+        print(f"Admin Stats Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-# --- Workshop Endpoints (Existing) ---
+@router.get("/admin/workshops/{workshop_id}/jobcards", response_model=List[JobCard], tags=["Admin"])
+async def get_admin_workshop_job_cards(workshop_id: str, is_admin: bool = Depends(verify_admin)):
+    """
+    Admin: Get all job cards for a specific workshop.
+    """
+    return await JobCard.find(JobCard.workshop_id == workshop_id).sort(-JobCard.id).to_list()
+
+# --- WORKSHOP ENDPOINTS (Standard) ---
 
 # --- Employees ---
 @router.post("/employees", response_model=Employee, status_code=status.HTTP_201_CREATED)
@@ -280,10 +307,3 @@ async def delete_part(part_id: str, user: AuthUser):
     part = await find_document(Part, part_id, user["uid"], "Part not found")
     await part.delete()
     return None
-
-@router.get("/admin/workshops/{workshop_id}/jobcards", response_model=List[JobCard], tags=["Admin"])
-async def get_admin_workshop_job_cards(workshop_id: str, is_admin: bool = Depends(verify_admin)):
-    """
-    Admin: Get all job cards for a specific workshop.
-    """
-    return await JobCard.find(JobCard.workshop_id == workshop_id).sort(-JobCard.id).to_list()

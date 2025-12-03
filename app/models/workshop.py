@@ -87,7 +87,7 @@ class Booking(Document):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     
     class Settings:
-        name = "bookings"
+        name = "grm_bookings"
 
 class Customer(Document):
     id: PydanticObjectId = Field(default_factory=PydanticObjectId, alias="_id")

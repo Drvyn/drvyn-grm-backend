@@ -13,6 +13,28 @@ from app.routers import workshop, dashboard
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# --- Keep Alive Function ---
+async def keep_alive():
+    """
+    Background task to ping the server periodically.
+    """
+    await asyncio.sleep(20)
+    url = "https://drvyn-grm-backend.vercel.app/" 
+    
+    while True:
+        try:
+            async with httpx.AsyncClient() as client:
+                # 10 second timeout to prevent hanging
+                await client.get(url, timeout=10.0)
+            logger.info("Keep-alive ping successful")
+        except Exception as e:
+            # We log the error but allow the loop to continue
+            logger.error(f"Keep-alive ping failed: {e}")
+        
+        # Ping every 10 minutes (600 seconds)
+        # Render free tier spins down after 15 minutes of inactivity.
+        await asyncio.sleep(600) 
+
 # --- Lifespan (Startup & Shutdown) ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -45,6 +67,7 @@ origins = [
     "http://localhost:3000",        
     "https://grm.drvyn.in",           
     "https://www.grm.drvyn.in",
+    # Add your render frontend domain if needed
 ]
 
 app.add_middleware(
@@ -65,4 +88,6 @@ def read_root():
     return {"message": "Welcome to the DrvynGRM API"}
 
 if __name__ == "__main__":
+    # Note: On Render, this block is usually skipped because they use the command 'uvicorn main:app' directly.
+    # However, it is useful for local debugging.
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

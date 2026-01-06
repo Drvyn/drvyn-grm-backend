@@ -242,10 +242,24 @@ async def delete_customer(customer_id: str, user: AuthUser):
 @router.post("/jobcards", response_model=JobCard, status_code=status.HTTP_201_CREATED)
 async def create_job_card(data: JobCardIn, user: AuthUser):
     workshop_id = user["uid"]
-    job_card = JobCard(**data.model_dump(), workshop_id=workshop_id)
-    await job_card.insert()
-    await log_activity(workshop_id, f"Job card created for {job_card.customer}", "FileText")
-    return job_card
+    
+    # Check if a Job Card already exists for this booking_id
+    existing_jc = await JobCard.find_one(
+        JobCard.workshop_id == workshop_id,
+        JobCard.booking_id == data.booking_id
+    )
+    
+    if existing_jc:
+        # Update the existing Job Card with new details from the booking/form
+        update_data = data.model_dump(exclude_unset=True)
+        await existing_jc.update({"$set": update_data})
+        return await JobCard.get(existing_jc.id)
+    else:
+        # Create a new one if it doesn't exist
+        job_card = JobCard(**data.model_dump(), workshop_id=workshop_id)
+        await job_card.insert()
+        await log_activity(workshop_id, f"Job card created for {job_card.customer}", "FileText")
+        return job_card
 
 @router.get("/jobcards", response_model=List[JobCard])
 async def get_job_cards(user: AuthUser):
@@ -261,23 +275,47 @@ async def update_job_card(jobcard_id: str, data: JobCardIn, user: AuthUser):
 @router.post("/invoices", response_model=Invoice, status_code=status.HTTP_201_CREATED)
 async def create_invoice(data: InvoiceIn, user: AuthUser):
     workshop_id = user["uid"]
-    invoice = Invoice(**data.model_dump(), workshop_id=workshop_id)
+    
+    # 1. Fetch the linked Job Card to get the most recent parts and services
+    # We use the jobCardId provided in the request data
+    job_card = await find_document(JobCard, data.jobCardId, workshop_id, "Linked Job Card not found")
+
+    # 2. Automatically calculate the total amount including taxes
+    # This ensures that even if the frontend calculation varies, the DB remains the source of truth
+    parts_total = sum(p.quantity * p.price * (1 + p.taxPercent / 100) for p in job_card.spareParts)
+    services_total = sum(s.cost * (1 + s.taxPercent / 100) for s in job_card.services)
+    calculated_total = round(parts_total + services_total, 2)
+
+    # 3. Create the invoice with the calculated amount
+    # We override the 'amount' field from the input data with our calculated total
+    invoice_data = data.model_dump()
+    invoice_data["amount"] = calculated_total
+    
+    invoice = Invoice(**invoice_data, workshop_id=workshop_id)
     await invoice.insert()
-    await log_activity(workshop_id, f"Invoice created for {invoice.customer}", "DollarSign")
+    
+    # 4. Log the activity for the dashboard
+    await log_activity(workshop_id, f"Invoice created for {invoice.customer}: ₹{calculated_total}", "DollarSign")
+    
     return invoice
 
 @router.get("/invoices", response_model=List[Invoice])
 async def get_invoices(user: AuthUser):
+    # Returns all invoices for the specific workshop to populate the dashboard/list
     return await Invoice.find(Invoice.workshop_id == user["uid"]).to_list()
 
 @router.put("/invoices/{invoice_id}", response_model=Invoice)
 async def update_invoice(invoice_id: str, data: InvoiceIn, user: AuthUser):
+    # Ensure the invoice exists and belongs to the user before updating
     invoice = await find_document(Invoice, invoice_id, user["uid"], "Invoice not found")
+    
+    # Update logic: we allow updating notes or status, but total amount is usually tied to items
     await invoice.update({"$set": data.model_dump(exclude_unset=True)})
     return await Invoice.get(invoice.id)
 
 @router.delete("/invoices/{invoice_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_invoice(invoice_id: str, user: AuthUser):
+    # Standard deletion with activity logging
     invoice = await find_document(Invoice, invoice_id, user["uid"], "Invoice not found")
     await invoice.delete()
     await log_activity(user["uid"], f"Deleted invoice for {invoice.customer}", "Trash2")

@@ -111,11 +111,11 @@ class JobCard(Document):
     customer: str
     phone: Optional[str] = None
     email: Optional[str] = None
+    address: Optional[str] = None
     vehicle: str
     service: str
     date: str
     time: str
-    # Updated Fields
     workers: List[str] = []
     spareParts: List[SparePartItem] = []
     services: List[ServiceItem] = []
@@ -124,6 +124,37 @@ class JobCard(Document):
     signature: Optional[str] = None
     notes: Optional[str] = None
     assignedMechanic: Optional[str] = None
+    customerAssets: Optional[str] = None 
+    workshopInstructions: Optional[str] = None  
+    
+    # --- Detailed Car & Customer Info ---
+    customerType: Optional[str] = None
+    taxNumber: Optional[str] = None
+    drivingLicenseNumber: Optional[str] = None
+    drivingLicenseExpiry: Optional[str] = None # Keeping as string for simplicity in JSON
+    businessType: Optional[str] = None
+    subType: Optional[str] = None
+    carNumber: Optional[str] = None
+    makeAndModel: Optional[str] = None
+    fuelType: Optional[str] = None
+    transmissionType: Optional[str] = None
+    engineNumber: Optional[str] = None
+    vinNumber: Optional[str] = None
+    variant: Optional[str] = None
+    makeYear: Optional[str] = None
+    color: Optional[str] = None
+    runningPerDay: Optional[str] = None
+    insuranceDetails: Optional[str] = None
+    serviceAdvisor: Optional[str] = None
+    bookingType: Optional[str] = None
+    department: Optional[str] = None
+    customerRemark: Optional[str] = None
+    odometer: Optional[str] = None
+    fuelIndicator: Optional[int] = None
+    
+    status: str = Field(default="pending")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
     
     class Settings:
         name = "job_cards"
@@ -225,6 +256,7 @@ class JobCardIn(BaseModel):
     customer: str
     phone: Optional[str] = None
     email: Optional[str] = None
+    address: Optional[str] = None
     vehicle: str
     service: str
     date: str
@@ -237,6 +269,34 @@ class JobCardIn(BaseModel):
     signature: Optional[str] = None
     notes: Optional[str] = None
     assignedMechanic: Optional[str] = None
+    customerAssets: Optional[str] = None
+    workshopInstructions: Optional[str] = None
+    
+    # Detailed fields
+    customerType: Optional[str] = None
+    taxNumber: Optional[str] = None
+    drivingLicenseNumber: Optional[str] = None
+    drivingLicenseExpiry: Optional[str] = None
+    businessType: Optional[str] = None
+    subType: Optional[str] = None
+    carNumber: Optional[str] = None
+    makeAndModel: Optional[str] = None
+    fuelType: Optional[str] = None
+    transmissionType: Optional[str] = None
+    engineNumber: Optional[str] = None
+    vinNumber: Optional[str] = None
+    variant: Optional[str] = None
+    makeYear: Optional[str] = None
+    color: Optional[str] = None
+    runningPerDay: Optional[str] = None
+    insuranceDetails: Optional[str] = None
+    serviceAdvisor: Optional[str] = None
+    bookingType: Optional[str] = None
+    department: Optional[str] = None
+    customerRemark: Optional[str] = None
+    odometer: Optional[str] = None
+    fuelIndicator: Optional[int] = None
+    status: Optional[str] = "pending"
 
 class InvoiceIn(BaseModel):
     jobCardId: str

@@ -15,7 +15,8 @@ from app.models.workshop import (
     Todo, TodoIn,
     ServiceCatalog, ServiceCatalogIn,
     Expense, ExpenseIn,
-    Vehicle, VehicleIn
+    Vehicle, VehicleIn,
+    Purchase,PurchaseIn
 )
 from app.services.activity_service import log_activity
 from beanie import PydanticObjectId

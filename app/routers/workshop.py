@@ -11,7 +11,9 @@ from app.models.workshop import (
     Customer, CustomerIn,
     JobCard, JobCardIn,
     Invoice, InvoiceIn,
-    Part, PartIn
+    Part, PartIn,
+    Todo, TodoIn,
+    ServiceCatalog, ServiceCatalogIn
 )
 from app.services.activity_service import log_activity
 from beanie import PydanticObjectId
@@ -344,4 +346,55 @@ async def update_part(part_id: str, data: PartIn, user: AuthUser):
 async def delete_part(part_id: str, user: AuthUser):
     part = await find_document(Part, part_id, user["uid"], "Part not found")
     await part.delete()
+    return None
+
+
+@router.post("/todos", response_model=Todo, status_code=status.HTTP_201_CREATED)
+async def create_todo(data: TodoIn, user: AuthUser):
+    workshop_id = user["uid"]
+    todo = Todo(**data.model_dump(), workshop_id=workshop_id)
+    await todo.insert()
+    await log_activity(workshop_id, f"Created task: {todo.title}", "CheckSquare")
+    return todo
+
+@router.get("/todos", response_model=List[Todo])
+async def get_todos(user: AuthUser):
+    return await Todo.find(Todo.workshop_id == user["uid"]).sort(-Todo.created_at).to_list()
+
+@router.put("/todos/{todo_id}", response_model=Todo)
+async def update_todo(todo_id: str, data: TodoIn, user: AuthUser):
+    todo = await find_document(Todo, todo_id, user["uid"], "Task not found")
+    await todo.update({"$set": data.model_dump(exclude_unset=True)})
+    return await Todo.get(todo.id)
+
+@router.delete("/todos/{todo_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_todo(todo_id: str, user: AuthUser):
+    todo = await find_document(Todo, todo_id, user["uid"], "Task not found")
+    await todo.delete()
+    return None
+
+# --- Service Catalog Routes ---
+
+@router.post("/services", response_model=ServiceCatalog, status_code=status.HTTP_201_CREATED)
+async def create_service(data: ServiceCatalogIn, user: AuthUser):
+    workshop_id = user["uid"]
+    service = ServiceCatalog(**data.model_dump(), workshop_id=workshop_id)
+    await service.insert()
+    await log_activity(workshop_id, f"Created service: {service.name}", "Layers")
+    return service
+
+@router.get("/services", response_model=List[ServiceCatalog])
+async def get_services(user: AuthUser):
+    return await ServiceCatalog.find(ServiceCatalog.workshop_id == user["uid"]).to_list()
+
+@router.put("/services/{service_id}", response_model=ServiceCatalog)
+async def update_service(service_id: str, data: ServiceCatalogIn, user: AuthUser):
+    service = await find_document(ServiceCatalog, service_id, user["uid"], "Service not found")
+    await service.update({"$set": data.model_dump(exclude_unset=True)})
+    return await ServiceCatalog.get(service.id)
+
+@router.delete("/services/{service_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_service(service_id: str, user: AuthUser):
+    service = await find_document(ServiceCatalog, service_id, user["uid"], "Service not found")
+    await service.delete()
     return None

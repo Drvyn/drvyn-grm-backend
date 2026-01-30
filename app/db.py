@@ -8,7 +8,9 @@ from app.models.workshop import (
     Customer, 
     JobCard, 
     Invoice, 
-    Part
+    Part,
+    Todo,            
+    ServiceCatalog
 )
 from app.models.activity import ActivityLog
 
@@ -36,7 +38,9 @@ async def init_db():
         JobCard,
         Invoice,
         Part,
-        ActivityLog
+        ActivityLog,
+        Todo,            
+        ServiceCatalog
     ]
     
     await init_beanie(database=database, document_models=document_models)

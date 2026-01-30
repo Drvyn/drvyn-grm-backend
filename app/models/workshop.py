@@ -317,3 +317,50 @@ class PartIn(BaseModel):
     unitCost: float
     supplier: Optional[str] = None
     notes: Optional[str] = None
+    
+class Todo(Document):
+    id: PydanticObjectId = Field(default_factory=PydanticObjectId, alias="_id")
+    workshop_id: Indexed(str)
+    title: str
+    description: Optional[str] = None
+    priority: str  
+    status: str    
+    dueDate: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    
+    class Settings:
+        name = "todos"
+
+class ServiceCatalog(Document):
+    id: PydanticObjectId = Field(default_factory=PydanticObjectId, alias="_id")
+    workshop_id: Indexed(str)
+    name: str
+    code: Optional[str] = None
+    barcode: Optional[str] = None
+    rate: float
+    taxPercent: float
+    sacCode: Optional[str] = None
+    classification: Optional[str] = None
+    isTaxExclusive: bool = False
+    isAdditionalService: bool = False
+    
+    class Settings:
+        name = "service_catalog"    
+        
+class TodoIn(BaseModel):
+    title: str
+    description: Optional[str] = None
+    priority: str
+    status: str
+    dueDate: Optional[datetime] = None
+
+class ServiceCatalogIn(BaseModel):
+    name: str
+    code: Optional[str] = None
+    barcode: Optional[str] = None
+    rate: float
+    taxPercent: float
+    sacCode: Optional[str] = None
+    classification: Optional[str] = None
+    isTaxExclusive: bool = False
+    isAdditionalService: bool = False        

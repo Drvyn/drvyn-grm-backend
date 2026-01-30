@@ -10,7 +10,10 @@ from app.models.workshop import (
     Invoice, 
     Part,
     Todo,            
-    ServiceCatalog
+    ServiceCatalog,
+    Vehicle,
+    Expense,
+    Purchase
 )
 from app.models.activity import ActivityLog
 
@@ -29,7 +32,6 @@ async def init_db():
     client = AsyncIOMotorClient(settings.MONGODB_URI)
     database = client[settings.DB_NAME]
     
-    # List all your Beanie Document models here
     document_models = [
         Employee,
         Department,
@@ -40,7 +42,10 @@ async def init_db():
         Part,
         ActivityLog,
         Todo,            
-        ServiceCatalog
+        ServiceCatalog,
+        Expense,  
+        Purchase,
+        Vehicle  
     ]
     
     await init_beanie(database=database, document_models=document_models)

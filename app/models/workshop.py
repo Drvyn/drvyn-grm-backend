@@ -23,6 +23,10 @@ class ServiceItem(BaseModel):
     cost: float
     taxPercent: float
 
+class ExpenseItem(BaseModel):
+    description: str
+    amount: float
+
 # --- Main Document Models ---
 
 class Employee(Document):
@@ -131,7 +135,7 @@ class JobCard(Document):
     customerType: Optional[str] = None
     taxNumber: Optional[str] = None
     drivingLicenseNumber: Optional[str] = None
-    drivingLicenseExpiry: Optional[str] = None # Keeping as string for simplicity in JSON
+    drivingLicenseExpiry: Optional[str] = None
     businessType: Optional[str] = None
     subType: Optional[str] = None
     carNumber: Optional[str] = None
@@ -188,6 +192,71 @@ class Part(Document):
     
     class Settings:
         name = "parts"
+
+class Todo(Document):
+    id: PydanticObjectId = Field(default_factory=PydanticObjectId, alias="_id")
+    workshop_id: Indexed(str)
+    title: str
+    description: Optional[str] = None
+    priority: str  
+    status: str    
+    dueDate: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    
+    class Settings:
+        name = "todos"
+
+class ServiceCatalog(Document):
+    id: PydanticObjectId = Field(default_factory=PydanticObjectId, alias="_id")
+    workshop_id: Indexed(str)
+    name: str
+    code: Optional[str] = None
+    barcode: Optional[str] = None
+    rate: float
+    taxPercent: float
+    sacCode: Optional[str] = None
+    classification: Optional[str] = None
+    isTaxExclusive: bool = False
+    isAdditionalService: bool = False
+    
+    class Settings:
+        name = "service_catalog" 
+
+class Expense(Document):
+    id: PydanticObjectId = Field(default_factory=PydanticObjectId, alias="_id")
+    workshop_id: Indexed(str)
+    expense_type: str
+    supplier: str
+    items: List[ExpenseItem]
+    remark: Optional[str] = None
+    created_at: datetime
+    
+    class Settings:
+        name = "expenses"
+
+# --- NEW VEHICLE MODEL ---
+class Vehicle(Document):
+    id: PydanticObjectId = Field(default_factory=PydanticObjectId, alias="_id")
+    workshop_id: Indexed(str)
+    carNumber: str
+    make: str
+    model: str
+    makeYear: Optional[str] = None
+    color: Optional[str] = None
+    vinNumber: Optional[str] = None
+    engineNumber: Optional[str] = None
+    fuelType: Optional[str] = None
+    transmissionType: Optional[str] = None
+    odometer: Optional[str] = None
+    fuelLevel: Optional[int] = None
+    customerName: Optional[str] = None
+    customerPhone: Optional[str] = None
+    notes: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    
+    class Settings:
+        name = "vehicles"
 
 # --- Input Models ---
 
@@ -317,41 +386,12 @@ class PartIn(BaseModel):
     unitCost: float
     supplier: Optional[str] = None
     notes: Optional[str] = None
-    
-class Todo(Document):
-    id: PydanticObjectId = Field(default_factory=PydanticObjectId, alias="_id")
-    workshop_id: Indexed(str)
-    title: str
-    description: Optional[str] = None
-    priority: str  
-    status: str    
-    dueDate: Optional[datetime] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    
-    class Settings:
-        name = "todos"
-
-class ServiceCatalog(Document):
-    id: PydanticObjectId = Field(default_factory=PydanticObjectId, alias="_id")
-    workshop_id: Indexed(str)
-    name: str
-    code: Optional[str] = None
-    barcode: Optional[str] = None
-    rate: float
-    taxPercent: float
-    sacCode: Optional[str] = None
-    classification: Optional[str] = None
-    isTaxExclusive: bool = False
-    isAdditionalService: bool = False
-    
-    class Settings:
-        name = "service_catalog"    
         
 class TodoIn(BaseModel):
-    title: str
+    title: Optional[str] = None       
     description: Optional[str] = None
-    priority: str
-    status: str
+    priority: Optional[str] = None    
+    status: Optional[str] = None     
     dueDate: Optional[datetime] = None
 
 class ServiceCatalogIn(BaseModel):
@@ -363,4 +403,53 @@ class ServiceCatalogIn(BaseModel):
     sacCode: Optional[str] = None
     classification: Optional[str] = None
     isTaxExclusive: bool = False
-    isAdditionalService: bool = False        
+    isAdditionalService: bool = False 
+
+class ExpenseIn(BaseModel):
+    expense_type: str
+    supplier: str
+    items: List[ExpenseItem]
+    remark: Optional[str] = None
+    created_at: datetime
+
+class VehicleIn(BaseModel):
+    carNumber: str
+    make: str
+    model: str
+    makeYear: Optional[str] = None
+    color: Optional[str] = None
+    vinNumber: Optional[str] = None
+    engineNumber: Optional[str] = None
+    fuelType: Optional[str] = None
+    transmissionType: Optional[str] = None
+    odometer: Optional[str] = None
+    fuelLevel: Optional[int] = None
+    customerName: Optional[str] = None
+    customerPhone: Optional[str] = None
+    notes: Optional[str] = None
+    
+class Purchase(Document):
+    id: PydanticObjectId = Field(default_factory=PydanticObjectId, alias="_id")
+    workshop_id: Indexed(str)
+    itemName: str
+    quantity: int
+    totalCost: float
+    supplier: Optional[str] = None
+    jobCardId: Optional[str] = None
+    invoiceNumber: Optional[str] = None
+    remarks: Optional[str] = None
+    purchaseDate: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    
+    class Settings:
+        name = "purchases"
+
+class PurchaseIn(BaseModel):
+    itemName: str
+    quantity: int
+    totalCost: float
+    supplier: Optional[str] = None
+    jobCardId: Optional[str] = None
+    invoiceNumber: Optional[str] = None
+    remarks: Optional[str] = None
+    purchaseDate: Optional[datetime] = None    

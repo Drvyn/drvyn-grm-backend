@@ -1,6 +1,6 @@
-from fastapi import APIRouter, HTTPException, status, Query
+from fastapi import APIRouter
 from typing import List, Dict, Any
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, timedelta
 from app.auth import UserOrAdmin
 from app.models.workshop import Booking, Invoice, JobCard
 from app.models.activity import ActivityLog
@@ -38,27 +38,35 @@ def get_db_collection(model_class):
         return model_class.get_motor_collection()
     raise AttributeError(f"Model {model_class} does not have a collection accessor method.")
 
-# ... [Existing get_dashboard_stats and get_dashboard_chart_data endpoints remain here unchanged] ...
+# --- DASHBOARD STATS (UPDATED TO USE JOB CARDS) ---
 @router.get("/dashboard-stats", response_model=DashboardStats)
 async def get_dashboard_stats(user: UserOrAdmin, from_date: date, to_date: date):
     is_admin = user["role"] == "admin"
     workshop_id = user["uid"]
+    
+    # Query logic for Job Cards (Jobs) instead of Bookings
     base_query = {"date": {"$gte": from_date.isoformat(), "$lte": to_date.isoformat()}}
     if not is_admin: base_query["workshop_id"] = workshop_id
 
-    booking_collection = get_db_collection(Booking)
+    # Switch to JobCard collection
+    jobcard_collection = get_db_collection(JobCard)
     invoice_collection = get_db_collection(Invoice)
 
-    bookings_count = await booking_collection.count_documents(base_query)
+    # 1. Total Jobs (Job Cards)
+    total_jobs_count = await jobcard_collection.count_documents(base_query)
     
+    # 2. Completed Jobs
     completed_query = base_query.copy()
     completed_query["status"] = "completed"
-    completed_count = await booking_collection.count_documents(completed_query)
+    completed_count = await jobcard_collection.count_documents(completed_query)
     
+    # 3. Pending Tasks (Any active status)
+    # Counts pending, in-progress, waiting-parts, urgent, ready
     pending_query = base_query.copy()
-    pending_query["status"] = "pending"
-    pending_count = await booking_collection.count_documents(pending_query)
+    pending_query["status"] = {"$in": ["pending", "in-progress", "waiting-parts", "urgent", "ready"]}
+    pending_count = await jobcard_collection.count_documents(pending_query)
 
+    # 4. Revenue (From Invoices)
     match_stage = {"status": "paid", "date": {"$gte": from_date.isoformat(), "$lte": to_date.isoformat()}}
     if not is_admin: match_stage["workshop_id"] = workshop_id
 
@@ -66,8 +74,9 @@ async def get_dashboard_stats(user: UserOrAdmin, from_date: date, to_date: date)
     revenue_result = await invoice_collection.aggregate(revenue_pipeline).to_list(length=1)
     total_revenue = revenue_result[0]["totalRevenue"] if revenue_result else 0.0
 
-    return DashboardStats(bookings=bookings_count, completed=completed_count, revenue=total_revenue, pending=pending_count)
+    return DashboardStats(bookings=total_jobs_count, completed=completed_count, revenue=total_revenue, pending=pending_count)
 
+# --- CHART DATA (UPDATED TO USE JOB CARDS) ---
 @router.get("/dashboard-chart-data", response_model=List[ChartDataPoint])
 async def get_dashboard_chart_data(user: UserOrAdmin, days: int = 30):
     is_admin = user["role"] == "admin"
@@ -80,19 +89,27 @@ async def get_dashboard_chart_data(user: UserOrAdmin, days: int = 30):
         data_map[current.isoformat()] = ChartDataPoint(date=current.strftime("%m/%d"))
         current += timedelta(days=1)
 
-    booking_collection = get_db_collection(Booking)
+    # Switch to JobCard collection
+    jobcard_collection = get_db_collection(JobCard)
     match_q = {"date": {"$gte": start_date.isoformat(), "$lte": end_date.isoformat()}}
     if not is_admin: match_q["workshop_id"] = workshop_id
     
-    b_res = await booking_collection.aggregate([
+    # Aggregate Job Cards per day
+    b_res = await jobcard_collection.aggregate([
         {"$match": match_q},
-        {"$group": {"_id": "$date", "count": {"$sum": 1}, "completed": {"$sum": {"$cond": [{"$eq": ["$status", "completed"]}, 1, 0]}}}}
+        {"$group": {
+            "_id": "$date", 
+            "count": {"$sum": 1}, 
+            "completed": {"$sum": {"$cond": [{"$eq": ["$status", "completed"]}, 1, 0]}}
+        }}
     ]).to_list(None)
+    
     for r in b_res:
         if r["_id"] in data_map:
             data_map[r["_id"]].bookings = r["count"]
             data_map[r["_id"]].completed = r["completed"]
 
+    # Aggregate Revenue (Invoices)
     invoice_collection = get_db_collection(Invoice)
     inv_match = {"status": "paid", "date": {"$gte": start_date.isoformat(), "$lte": end_date.isoformat()}}
     if not is_admin: inv_match["workshop_id"] = workshop_id
@@ -114,16 +131,12 @@ async def get_recent_activity(user: UserOrAdmin):
         return await ActivityLog.find_all().sort(-ActivityLog.created_at).limit(5).to_list()
     return await ActivityLog.find(ActivityLog.workshop_id == user["uid"]).sort(-ActivityLog.created_at).limit(5).to_list()
 
-# --- NEW REPORT ENDPOINT ---
 @router.get("/reports", response_model=ReportStats)
 async def get_reports_data(user: UserOrAdmin):
-    """
-    Aggregates real data for the Reports page.
-    """
     is_admin = user["role"] == "admin"
     workshop_id = user["uid"]
     
-    # 1. Revenue (Monthly) - Last 6 months
+    # 1. Revenue (Monthly)
     invoice_collection = get_db_collection(Invoice)
     revenue_match = {"status": "paid"}
     if not is_admin: revenue_match["workshop_id"] = workshop_id
@@ -140,37 +153,34 @@ async def get_reports_data(user: UserOrAdmin):
     ]
     rev_results = await invoice_collection.aggregate(revenue_pipeline).to_list(None)
     
-    # Fill in last 6 months
     revenue_data = []
     today = datetime.today()
     for i in range(5, -1, -1):
         d = today - timedelta(days=i*30)
         month_key = d.strftime("%Y-%m")
         month_label = d.strftime("%b")
-        
         found = next((r for r in rev_results if r["_id"] == month_key), None)
         revenue_data.append({
             "month": month_label,
             "revenue": found["total"] if found else 0,
-            "target": 0 # Remove or mock if needed
+            "target": 0
         })
 
-    # 2. Service Breakdown
-    booking_collection = get_db_collection(Booking)
-    match_booking = {} if is_admin else {"workshop_id": workshop_id}
+    # 2. Service Breakdown (Using Job Cards now)
+    jobcard_collection = get_db_collection(JobCard)
+    match_jobs = {} if is_admin else {"workshop_id": workshop_id}
     
     service_pipeline = [
-        {"$match": match_booking},
-        {"$group": {"_id": "$bookingType", "value": {"$sum": 1}}}
+        {"$match": match_jobs},
+        {"$group": {"_id": "$service", "value": {"$sum": 1}}}
     ]
-    service_results = await booking_collection.aggregate(service_pipeline).to_list(None)
+    service_results = await jobcard_collection.aggregate(service_pipeline).to_list(None)
     service_breakdown = [{"name": s["_id"] or "Unknown", "value": s["value"]} for s in service_results]
 
-    # 3. Customer Growth (New customers per month)
-    # Group by customer name, find first booking date
+    # 3. Customer Growth
     growth_pipeline = [
-        {"$match": match_booking},
-        {"$group": {"_id": "$customerName", "first_seen": {"$min": "$date"}}},
+        {"$match": match_jobs},
+        {"$group": {"_id": "$customer", "first_seen": {"$min": "$date"}}},
         {
             "$group": {
                 "_id": {"$substr": ["$first_seen", 0, 7]}, # YYYY-MM
@@ -179,14 +189,13 @@ async def get_reports_data(user: UserOrAdmin):
         },
         {"$sort": {"_id": 1}}
     ]
-    growth_raw = await booking_collection.aggregate(growth_pipeline).to_list(None)
+    growth_raw = await jobcard_collection.aggregate(growth_pipeline).to_list(None)
     
     customer_growth = []
     for i in range(5, -1, -1):
         d = today - timedelta(days=i*30)
         month_key = d.strftime("%Y-%m")
         month_label = d.strftime("%b")
-        
         found = next((g for g in growth_raw if g["_id"] == month_key), None)
         customer_growth.append({
             "month": month_label,
@@ -204,12 +213,12 @@ async def get_reports_data(user: UserOrAdmin):
     top_customers = [{"name": c["_id"], "spent": c["spent"], "bookings": c["bookings"]} for c in top_cx_res]
 
     # 5. Performance
-    total_bookings = await booking_collection.count_documents(match_booking)
-    completed_bookings = await booking_collection.count_documents({**match_booking, "status": "completed"})
-    completion_rate = (completed_bookings / total_bookings * 100) if total_bookings > 0 else 0
+    total_jobs = await jobcard_collection.count_documents(match_jobs)
+    completed_jobs = await jobcard_collection.count_documents({**match_jobs, "status": "completed"})
+    completion_rate = (completed_jobs / total_jobs * 100) if total_jobs > 0 else 0
     
     total_rev = sum(d["revenue"] for d in revenue_data)
-    avg_job_value = (total_rev / total_bookings) if total_bookings > 0 else 0
+    avg_job_value = (total_rev / total_jobs) if total_jobs > 0 else 0
 
     return ReportStats(
         revenue_data=revenue_data,

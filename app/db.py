@@ -13,7 +13,8 @@ from app.models.workshop import (
     ServiceCatalog,
     Vehicle,
     Expense,
-    Purchase
+    Purchase,
+    WorkshopSettings  # <-- Added
 )
 from app.models.activity import ActivityLog
 
@@ -45,7 +46,8 @@ async def init_db():
         ServiceCatalog,
         Expense,  
         Purchase,
-        Vehicle  
+        Vehicle,
+        WorkshopSettings 
     ]
     
     await init_beanie(database=database, document_models=document_models)

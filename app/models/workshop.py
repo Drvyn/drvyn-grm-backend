@@ -29,6 +29,31 @@ class ExpenseItem(BaseModel):
 
 # --- Main Document Models ---
 
+class WorkshopSettings(Document):
+    id: PydanticObjectId = Field(default_factory=PydanticObjectId, alias="_id")
+    workshop_id: Indexed(str, unique=True)
+    
+    # Business Details
+    businessName: str = ""
+    phone: str = ""
+    email: str = ""
+    address: str = ""
+    taxNumber: str = ""
+    website: str = ""
+    
+    # Invoice Settings
+    invoicePrefix: str = "INV-"
+    invoiceTerms: str = "Payment due upon receipt."
+    
+    # Preferences
+    darkMode: bool = False
+    notifications: bool = True
+    
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    
+    class Settings:
+        name = "workshop_settings"
+
 class Employee(Document):
     id: PydanticObjectId = Field(default_factory=PydanticObjectId, alias="_id")
     workshop_id: Indexed(str)
@@ -258,7 +283,35 @@ class Vehicle(Document):
     class Settings:
         name = "vehicles"
 
+class Purchase(Document):
+    id: PydanticObjectId = Field(default_factory=PydanticObjectId, alias="_id")
+    workshop_id: Indexed(str)
+    itemName: str
+    quantity: int
+    totalCost: float
+    supplier: Optional[str] = None
+    jobCardId: Optional[str] = None
+    invoiceNumber: Optional[str] = None
+    remarks: Optional[str] = None
+    purchaseDate: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    
+    class Settings:
+        name = "purchases"
+
 # --- Input Models ---
+
+class WorkshopSettingsIn(BaseModel):
+    businessName: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    address: Optional[str] = None
+    taxNumber: Optional[str] = None
+    website: Optional[str] = None
+    invoicePrefix: Optional[str] = None
+    invoiceTerms: Optional[str] = None
+    darkMode: Optional[bool] = None
+    notifications: Optional[bool] = None
 
 class EmployeeIn(BaseModel):
     designation: str
@@ -427,22 +480,6 @@ class VehicleIn(BaseModel):
     customerName: Optional[str] = None
     customerPhone: Optional[str] = None
     notes: Optional[str] = None
-    
-class Purchase(Document):
-    id: PydanticObjectId = Field(default_factory=PydanticObjectId, alias="_id")
-    workshop_id: Indexed(str)
-    itemName: str
-    quantity: int
-    totalCost: float
-    supplier: Optional[str] = None
-    jobCardId: Optional[str] = None
-    invoiceNumber: Optional[str] = None
-    remarks: Optional[str] = None
-    purchaseDate: Optional[datetime] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    
-    class Settings:
-        name = "purchases"
 
 class PurchaseIn(BaseModel):
     itemName: str
@@ -452,4 +489,4 @@ class PurchaseIn(BaseModel):
     jobCardId: Optional[str] = None
     invoiceNumber: Optional[str] = None
     remarks: Optional[str] = None
-    purchaseDate: Optional[datetime] = None    
+    purchaseDate: Optional[datetime] = None

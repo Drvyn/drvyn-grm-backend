@@ -16,7 +16,8 @@ from app.models.workshop import (
     ServiceCatalog, ServiceCatalogIn,
     Expense, ExpenseIn,
     Vehicle, VehicleIn,
-    Purchase,PurchaseIn
+    Purchase,PurchaseIn,
+    WorkshopSettings, WorkshopSettingsIn
 )
 from app.services.activity_service import log_activity
 from beanie import PydanticObjectId
@@ -484,3 +485,24 @@ async def create_purchase(data: PurchaseIn, user: AuthUser):
 @router.get("/purchases", response_model=List[Purchase])
 async def get_purchases(user: AuthUser):
     return await Purchase.find(Purchase.workshop_id == user["uid"]).sort(-Purchase.created_at).to_list()
+
+@router.get("/settings", response_model=WorkshopSettings)
+async def get_settings(user: AuthUser):
+    workshop_id = user["uid"]
+    settings = await WorkshopSettings.find_one(WorkshopSettings.workshop_id == workshop_id)
+    if not settings:
+        # Create default settings if they don't exist
+        settings = WorkshopSettings(workshop_id=workshop_id)
+        await settings.insert()
+    return settings
+
+@router.put("/settings", response_model=WorkshopSettings)
+async def update_settings(data: WorkshopSettingsIn, user: AuthUser):
+    workshop_id = user["uid"]
+    settings = await WorkshopSettings.find_one(WorkshopSettings.workshop_id == workshop_id)
+    if not settings:
+        settings = WorkshopSettings(workshop_id=workshop_id)
+        await settings.insert()
+    
+    await settings.update({"$set": data.model_dump(exclude_unset=True)})
+    return await WorkshopSettings.find_one(WorkshopSettings.workshop_id == workshop_id)
